@@ -1,0 +1,8 @@
+compile:
+  clang hello.s -lc -o hello && ./hello
+
+simple:
+  clang -v main.c -o main
+
+clean:
+ rm -f *.o main hello a.out
