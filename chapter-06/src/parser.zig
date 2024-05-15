@@ -75,6 +75,10 @@ pub const Lexer = struct {
         };
     }
 
+    pub fn slice(self: *Lexer, token: Token) []const u8 {
+        return self.input[token.start..token.end];
+    }
+
     pub fn peek(self: *Lexer) ?Token {
         const start = self.index;
         const token = self.next();
@@ -226,27 +230,79 @@ pub const Lexer = struct {
     }
 };
 
-const AstArray = std.array_list.ArrayList(Ast);
+const AstArray = std.ArrayList(Ast);
+
+pub const ParserError = error{
+    InvalidToken,
+};
 
 pub const Parser = struct {
     lexer: Lexer,
     allocator: std.mem.Allocator,
     statements: AstArray,
 
-    fn init(allocator: std.mem.Allocator, input: []const u8) Parser {
+    fn init(allocator: std.mem.Allocator, input: []const u8) !Parser {
+        const statements = try AstArray.initCapacity(allocator, 100);
         return Parser{
             .lexer = Lexer.init(input),
             .allocator = allocator,
-            .statements = AstArray.init(allocator),
+            .statements = statements,
         };
     }
 
-    fn parse(self: *Parser) void {
-        self;
+    fn check_token_str(self: *Parser, token: Token, str: []const u8) bool {
+        return std.mem.eql(u8, self.lexer.slice(token), str);
     }
 
-    fn parse_statement(self: *Parser) void {
-        self;
+    fn parse(self: *Parser) !void {
+        _ = try self.parse_statement();
+    }
+
+    fn parse_statement(self: *Parser) !void {
+        const _token = self.lexer.next();
+        if (_token == null) return;
+
+        const token = _token.?;
+        switch (token.token_type) {
+            TokenType.Identifier => {
+                if (!self.check_token_str(token, "var")) {
+                    return ParserError.InvalidToken;
+                }
+                _ = try self.parse_identifier();
+                const _eq_token = self.lexer.next();
+                if (_eq_token == null) return;
+
+                const eq_token = _eq_token.?;
+                if (eq_token.token_type != TokenType.Operator) {
+                    return ParserError.InvalidToken;
+                }
+                if (!self.check_token_str(eq_token, "=")) {
+                    return ParserError.InvalidToken;
+                }
+
+                // std.debug.print("identifier: {s}\n", .{@tagName(@as(AstType, identifier))});
+                // const value = try self.parse_expression();
+                // const var_stmt = Ast{ .Var = .{ .identifier = identifier, .value = value } };
+                // try self.statements.append(var_stmt);
+            },
+            else => {
+                return ParserError.InvalidToken;
+            },
+        }
+    }
+
+    fn parse_identifier(self: *Parser) !*const Ast {
+        const _token = self.lexer.next();
+        if (_token) |token| {
+            if (token.token_type != TokenType.Identifier) {
+                return ParserError.InvalidToken;
+            }
+            const node = Ast{ .Identifier = self.lexer.slice(token) };
+            try self.statements.append(node);
+            return &self.statements.getLast();
+        }
+
+        return ParserError.InvalidToken;
     }
 
     fn deinint(self: *Parser) void {
@@ -336,4 +392,13 @@ test "var statement" {
     try std.testing.expect(token.token_type == TokenType.Semicolon);
     const t = lexer.next();
     try std.testing.expect(t == null);
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const allocator = arena.allocator();
+
+    var parser = try Parser.init(allocator, string_input);
+
+    try parser.parse();
 }
