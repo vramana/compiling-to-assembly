@@ -1,5 +1,37 @@
 const std = @import("std");
 
+const AstType = enum {
+    Number,
+    Operator,
+    If,
+    Identifier,
+    Call,
+    Function,
+    Block,
+    Return,
+    Var,
+};
+
+const Ast = union(AstType) {
+    Number: i64,
+    Operator: []const u8,
+    If: void,
+    Identifier: []const u8,
+    Call: struct {
+        func: *Ast,
+        args: []*Ast,
+    },
+    Function: void,
+    Block: struct {
+        stmts: []*Ast,
+    },
+    Return: *Ast,
+    Var: struct {
+        identifier: *Ast,
+        value: *Ast,
+    },
+};
+
 pub const TokenType = enum {
     Identifier,
     Number,
@@ -41,6 +73,13 @@ pub const Lexer = struct {
             .index = 0,
             .done = false,
         };
+    }
+
+    pub fn peek(self: *Lexer) ?Token {
+        const start = self.index;
+        const token = self.next();
+        self.index = start;
+        return token;
     }
 
     pub fn next(self: *Lexer) ?Token {
@@ -109,7 +148,7 @@ pub const Lexer = struct {
                     self.index += 1;
                     return Token{ .token_type = TokenType.RightBracket, .start = start, .end = self.index };
                 },
-                '+' | '-' | '*' | '/' => {
+                '+', '-', '*', '/' => {
                     const start = self.index;
                     self.index += 1;
                     return Token{ .token_type = TokenType.Operator, .start = start, .end = self.index };
@@ -131,7 +170,7 @@ pub const Lexer = struct {
                     self.index += 1;
                     if (self.index < self.input.len) {
                         const c2 = self.input[self.index];
-                        if (c2 == '=' and c2 == '<') {
+                        if (c2 == '=' or c2 == '<') {
                             self.index += 1;
                             return Token{ .token_type = TokenType.Operator, .start = start, .end = self.index };
                         }
@@ -143,7 +182,7 @@ pub const Lexer = struct {
                     self.index += 1;
                     if (self.index < self.input.len) {
                         const c2 = self.input[self.index];
-                        if (c2 == '=' and c2 == '>') {
+                        if (c2 == '=' or c2 == '>') {
                             self.index += 1;
                             return Token{ .token_type = TokenType.Operator, .start = start, .end = self.index };
                         }
@@ -187,6 +226,34 @@ pub const Lexer = struct {
     }
 };
 
+const AstArray = std.array_list.ArrayList(Ast);
+
+pub const Parser = struct {
+    lexer: Lexer,
+    allocator: std.mem.Allocator,
+    statements: AstArray,
+
+    fn init(allocator: std.mem.Allocator, input: []const u8) Parser {
+        return Parser{
+            .lexer = Lexer.init(input),
+            .allocator = allocator,
+            .statements = AstArray.init(allocator),
+        };
+    }
+
+    fn parse(self: *Parser) void {
+        self;
+    }
+
+    fn parse_statement(self: *Parser) void {
+        self;
+    }
+
+    fn deinint(self: *Parser) void {
+        self.statements.deinit();
+    }
+};
+
 test "identifiers and numbers" {
     const string_input = "test test_123 123";
     var lexer = Lexer.init(string_input);
@@ -211,6 +278,8 @@ test "identifiers and numbers" {
         try std.testing.expect(_token.start == 14);
         try std.testing.expect(_token.end == 17);
     }
+    const t = lexer.next();
+    try std.testing.expect(t == null);
 }
 
 test "operators" {
@@ -223,6 +292,8 @@ test "operators" {
             try std.testing.expect(_token.token_type == TokenType.Operator);
         }
     }
+    const t = lexer.next();
+    try std.testing.expect(t == null);
 }
 
 test "punctuation" {
@@ -246,6 +317,23 @@ test "punctuation" {
     try std.testing.expect(token.token_type == TokenType.Semicolon);
     token = lexer.next().?;
     try std.testing.expect(token.token_type == TokenType.Colon);
+    const t = lexer.next();
+    try std.testing.expect(t == null);
+}
+
+test "var statement" {
+    const string_input = "var x = 123;";
+    var lexer = Lexer.init(string_input);
+    var token = lexer.next().?;
+    try std.testing.expect(token.token_type == TokenType.Identifier);
+    token = lexer.next().?;
+    try std.testing.expect(token.token_type == TokenType.Identifier);
+    token = lexer.next().?;
+    try std.testing.expect(token.token_type == TokenType.Operator);
+    token = lexer.next().?;
+    try std.testing.expect(token.token_type == TokenType.Number);
+    token = lexer.next().?;
+    try std.testing.expect(token.token_type == TokenType.Semicolon);
     const t = lexer.next();
     try std.testing.expect(t == null);
 }
