@@ -94,13 +94,15 @@ pub const Lexer = struct {
 
     pub fn peek(self: *Lexer) ?Token {
         const start = self.index;
-        const token = self.next();
+        const token: ?Token = self.next() catch blk: {
+            break :blk null;
+        };
         self.index = start;
         return token;
     }
 
-    pub fn next(self: *Lexer) ?Token {
-        if (self.done) return null;
+    pub fn next(self: *Lexer) !Token {
+        if (self.done) return ParserError.MissingToken;
 
         const token = null;
 
@@ -239,7 +241,11 @@ pub const Lexer = struct {
             }
         }
 
-        return token;
+        if (token) |_t| {
+            return _t;
+        }
+
+        return ParserError.MissingToken;
     }
 };
 
@@ -295,28 +301,18 @@ pub const Parser = struct {
     }
 
     fn expect(self: *Parser, str: []const u8) !void {
-        const _token = self.lexer.next();
-        if (_token) |token| {
-            if (!std.mem.eql(u8, self.lexer.slice(token), str)) {
-                return ParserError.InvalidToken;
-            }
+        const token = try self.lexer.next();
+        if (!std.mem.eql(u8, self.lexer.slice(token), str)) {
+            return ParserError.InvalidToken;
         }
-
-        return ParserError.MissingToken;
     }
 
     fn expect_token_type(self: *Parser, token_type: TokenType) !void {
-        const _token = self.lexer.next();
-        if (_token) |token| {
-            if (token.token_type != token_type) {
-                return ParserError.InvalidToken;
-            }
-            return;
+        const token = try self.lexer.next();
+        if (token.token_type != token_type) {
+            return ParserError.InvalidToken;
         }
-
-        log("missing token in expect");
-
-        return ParserError.MissingToken;
+        return;
     }
 
     fn parse(self: *Parser) !void {
@@ -338,35 +334,22 @@ pub const Parser = struct {
     }
 
     fn parse_statement(self: *Parser) !Ast {
-        const _token = self.lexer.next();
-        if (_token == null) return ParserError.MissingToken;
-
-        const token = _token.?;
+        const token = try self.lexer.next();
         switch (token.token_type) {
             TokenType.Identifier => {
                 if (!self.check_token_str(token, "var")) {
                     return ParserError.InvalidToken;
                 }
                 const identifier = try self.parse_identifier();
-                const _eq_token = self.lexer.next();
-                if (_eq_token == null) return ParserError.InvalidToken;
+                const eq_token = try self.lexer.next();
 
-                const eq_token = _eq_token.?;
-                if (eq_token.token_type != TokenType.Operator) {
-                    return ParserError.InvalidToken;
-                }
                 if (!self.check_token_str(eq_token, "=")) {
                     return ParserError.InvalidToken;
                 }
 
                 const value = try self.parse_expression(0);
 
-                const semicolon_token = self.lexer.next();
-                if (semicolon_token == null) return ParserError.MissingToken;
-
-                if (semicolon_token.?.token_type != TokenType.Semicolon) {
-                    return ParserError.InvalidToken;
-                }
+                try self.expect_token_type(TokenType.Semicolon);
 
                 // std.debug.print("identifier: {s}\n", .{@tagName(@as(AstType, identifier))});
                 // const value = try self.parse_expression();
@@ -420,38 +403,34 @@ pub const Parser = struct {
     }
 
     fn parse_infix(self: *Parser, left: *Ast) !*Ast {
-        const _token = self.lexer.next();
-        if (_token) |token| {
-            switch (token.token_type) {
-                TokenType.Operator => {
-                    if (self.check_token_str(token, "+") or
-                        self.check_token_str(token, "-") or
-                        self.check_token_str(token, "*") or
-                        self.check_token_str(token, "/"))
-                    {
-                        const op = self.lexer.slice(token);
+        const token = try self.lexer.next();
+        switch (token.token_type) {
+            TokenType.Operator => {
+                if (self.check_token_str(token, "+") or
+                    self.check_token_str(token, "-") or
+                    self.check_token_str(token, "*") or
+                    self.check_token_str(token, "/"))
+                {
+                    const op = self.lexer.slice(token);
 
-                        log("parsing infix \n");
+                    log("parsing infix \n");
 
-                        const token_precedence = @intFromEnum(self.getPrecedence(token));
-                        const right = try self.parse_expression(token_precedence);
+                    const token_precedence = @intFromEnum(self.getPrecedence(token));
+                    const right = try self.parse_expression(token_precedence);
 
-                        log("parsed right \n");
+                    log("parsed right \n");
 
-                        const node = Ast{ .BinaryOperator = .{ .op = op, .left = left, .right = right } };
+                    const node = Ast{ .BinaryOperator = .{ .op = op, .left = left, .right = right } };
 
-                        return try self.push_node(node);
-                    } else {
-                        return ParserError.InvalidToken;
-                    }
-                },
-                else => {
+                    return try self.push_node(node);
+                } else {
                     return ParserError.InvalidToken;
-                },
-            }
+                }
+            },
+            else => {
+                return ParserError.InvalidToken;
+            },
         }
-
-        return ParserError.MissingToken;
     }
 
     fn parse_primary_expression(self: *Parser) !*Ast {
@@ -475,31 +454,23 @@ pub const Parser = struct {
     }
 
     fn parse_identifier(self: *Parser) !*Ast {
-        const _token = self.lexer.next();
-        if (_token) |token| {
-            if (token.token_type != TokenType.Identifier) {
-                return ParserError.InvalidToken;
-            }
-            const node = Ast{ .Identifier = self.lexer.slice(token) };
-            return try self.push_node(node);
+        const token = try self.lexer.next();
+        if (token.token_type != TokenType.Identifier) {
+            return ParserError.InvalidToken;
         }
-
-        return ParserError.MissingToken;
+        const node = Ast{ .Identifier = self.lexer.slice(token) };
+        return try self.push_node(node);
     }
 
     fn parse_number(self: *Parser) !*Ast {
-        const _token = self.lexer.next();
-        if (_token) |token| {
-            if (token.token_type != TokenType.Number) {
-                return ParserError.InvalidToken;
-            }
-            const number = try std.fmt.parseInt(i64, self.lexer.slice(token), 10);
-            const node = Ast{ .Number = number };
-
-            return try self.push_node(node);
+        const token = try self.lexer.next();
+        if (token.token_type != TokenType.Number) {
+            return ParserError.InvalidToken;
         }
+        const number = try std.fmt.parseInt(i64, self.lexer.slice(token), 10);
+        const node = Ast{ .Number = number };
 
-        return ParserError.MissingToken;
+        return try self.push_node(node);
     }
 
     fn deinint(self: *Parser) void {
@@ -510,28 +481,20 @@ pub const Parser = struct {
 test "identifiers and numbers" {
     const string_input = "test test_123 123";
     var lexer = Lexer.init(string_input);
-    var token = lexer.next();
-    try std.testing.expect(token != null);
-    if (token) |_token| {
-        try std.testing.expect(_token.token_type == TokenType.Identifier);
-        try std.testing.expect(_token.start == 0);
-        try std.testing.expect(_token.end == 4);
-    }
-    token = lexer.next();
-    try std.testing.expect(token != null);
-    if (token) |_token| {
-        try std.testing.expect(_token.token_type == TokenType.Identifier);
-        try std.testing.expect(_token.start == 5);
-        try std.testing.expect(_token.end == 13);
-    }
-    token = lexer.next();
-    try std.testing.expect(token != null);
-    if (token) |_token| {
-        try std.testing.expect(_token.token_type == TokenType.Number);
-        try std.testing.expect(_token.start == 14);
-        try std.testing.expect(_token.end == 17);
-    }
-    const t = lexer.next();
+    var _token = try lexer.next();
+    try std.testing.expect(_token.token_type == TokenType.Identifier);
+    try std.testing.expect(_token.start == 0);
+    try std.testing.expect(_token.end == 4);
+    _token = try lexer.next();
+    try std.testing.expect(_token.token_type == TokenType.Identifier);
+    try std.testing.expect(_token.start == 5);
+    try std.testing.expect(_token.end == 13);
+    _token = try lexer.next();
+    try std.testing.expect(_token.token_type == TokenType.Number);
+    try std.testing.expect(_token.start == 14);
+    try std.testing.expect(_token.end == 17);
+
+    const t = lexer.peek();
     try std.testing.expect(t == null);
 }
 
@@ -539,55 +502,50 @@ test "operators" {
     const string_input = "+ - * / < <= > >= == != << >>";
     var lexer = Lexer.init(string_input);
     for (0..12) |_| {
-        const token = lexer.next();
-        try std.testing.expect(token != null);
-        if (token) |_token| {
-            try std.testing.expect(_token.token_type == TokenType.Operator);
-        }
+        const token = try lexer.next();
+        try std.testing.expect(token.token_type == TokenType.Operator);
     }
-    const t = lexer.next();
+    const t = lexer.peek();
     try std.testing.expect(t == null);
 }
 
 test "punctuation" {
     const string_input = "{ } ( ) [ ] , ; :";
     var lexer = Lexer.init(string_input);
-    var token = lexer.next().?;
+    var token = try lexer.next();
     try std.testing.expect(token.token_type == TokenType.LeftCurly);
-    token = lexer.next().?;
+    token = try lexer.next();
     try std.testing.expect(token.token_type == TokenType.RightCurly);
-    token = lexer.next().?;
+    token = try lexer.next();
     try std.testing.expect(token.token_type == TokenType.LeftParen);
-    token = lexer.next().?;
+    token = try lexer.next();
     try std.testing.expect(token.token_type == TokenType.RightParen);
-    token = lexer.next().?;
+    token = try lexer.next();
     try std.testing.expect(token.token_type == TokenType.LeftBracket);
-    token = lexer.next().?;
+    token = try lexer.next();
     try std.testing.expect(token.token_type == TokenType.RightBracket);
-    token = lexer.next().?;
+    token = try lexer.next();
     try std.testing.expect(token.token_type == TokenType.Comma);
-    token = lexer.next().?;
+    token = try lexer.next();
     try std.testing.expect(token.token_type == TokenType.Semicolon);
-    token = lexer.next().?;
+    token = try lexer.next();
     try std.testing.expect(token.token_type == TokenType.Colon);
-    const t = lexer.next();
-    try std.testing.expect(t == null);
 }
 
 test "var statement" {
     var string_input: []const u8 = "var x = 123;";
     var lexer = Lexer.init(string_input);
-    var token = lexer.next().?;
+    var token = try lexer.next();
     try std.testing.expect(token.token_type == TokenType.Identifier);
-    token = lexer.next().?;
+    token = try lexer.next();
     try std.testing.expect(token.token_type == TokenType.Identifier);
-    token = lexer.next().?;
+    token = try lexer.next();
     try std.testing.expect(token.token_type == TokenType.Operator);
-    token = lexer.next().?;
+    token = try lexer.next();
     try std.testing.expect(token.token_type == TokenType.Number);
-    token = lexer.next().?;
+    token = try lexer.next();
     try std.testing.expect(token.token_type == TokenType.Semicolon);
-    const t = lexer.next();
+    const t = lexer.peek();
     try std.testing.expect(t == null);
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
