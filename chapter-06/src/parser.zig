@@ -15,7 +15,7 @@ const AstType = enum {
 
 fn log(message: []const u8) void {
     if (1 > 2) {
-        std.debug.print("{s}", .{message});
+        std.debug.print("{s}\n", .{message});
     }
 }
 
@@ -294,6 +294,31 @@ pub const Parser = struct {
         return std.mem.eql(u8, self.lexer.slice(token), str);
     }
 
+    fn expect(self: *Parser, str: []const u8) !void {
+        const _token = self.lexer.next();
+        if (_token) |token| {
+            if (!std.mem.eql(u8, self.lexer.slice(token), str)) {
+                return ParserError.InvalidToken;
+            }
+        }
+
+        return ParserError.MissingToken;
+    }
+
+    fn expect_token_type(self: *Parser, token_type: TokenType) !void {
+        const _token = self.lexer.next();
+        if (_token) |token| {
+            if (token.token_type != token_type) {
+                return ParserError.InvalidToken;
+            }
+            return;
+        }
+
+        log("missing token in expect");
+
+        return ParserError.MissingToken;
+    }
+
     fn parse(self: *Parser) !void {
         _ = try self.parse_body();
     }
@@ -376,6 +401,15 @@ pub const Parser = struct {
         if (_token) |token| {
             switch (token.token_type) {
                 TokenType.Number, TokenType.Identifier => return self.parse_primary_expression(),
+                TokenType.LeftParen => {
+                    log("left paren");
+                    try self.expect_token_type(TokenType.LeftParen);
+                    const node = try self.parse_expression(0);
+                    try self.expect_token_type(TokenType.RightParen);
+                    log("right paren");
+
+                    return node;
+                },
                 else => {
                     return ParserError.InvalidToken;
                 },
@@ -571,7 +605,7 @@ test "var statement" {
 
 test "expression" {
     log("\n");
-    const string_input: []const u8 = "1 + 2";
+    const string_input: []const u8 = "(1 + 2)";
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -583,10 +617,11 @@ test "expression" {
 }
 
 test "block" {
+    log("\n");
     const string_input =
-        \\var x = 123;
-        \\var y = x + z * y / z;
-        \\var z = y;
+        \\var x = 34;
+        \\var z = (1 + 2);
+        \\var y = (x * z) / t;
     ;
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
