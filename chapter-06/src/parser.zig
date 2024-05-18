@@ -94,9 +94,7 @@ pub const Lexer = struct {
 
     pub fn peek(self: *Lexer) ?Token {
         const start = self.index;
-        const token: ?Token = self.next() catch blk: {
-            break :blk null;
-        };
+        const token: ?Token = self.next() catch null;
         self.index = start;
         return token;
     }
