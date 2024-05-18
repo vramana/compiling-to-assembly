@@ -2,7 +2,8 @@ const std = @import("std");
 
 const AstType = enum {
     Number,
-    Operator,
+    UnaryOperator,
+    BinaryOperator,
     If,
     Identifier,
     Call,
@@ -12,9 +13,23 @@ const AstType = enum {
     Var,
 };
 
+fn log(message: []const u8) void {
+    if (1 > 2) {
+        std.debug.print("{s}", .{message});
+    }
+}
+
 const Ast = union(AstType) {
     Number: i64,
-    Operator: []const u8,
+    UnaryOperator: struct {
+        op: []const u8,
+        expr: *Ast,
+    },
+    BinaryOperator: struct {
+        op: []const u8,
+        left: *Ast,
+        right: *Ast,
+    },
     If: void,
     Identifier: []const u8,
     Call: struct {
@@ -22,9 +37,7 @@ const Ast = union(AstType) {
         args: []*Ast,
     },
     Function: void,
-    Block: struct {
-        stmts: []*Ast,
-    },
+    Block: AstArray,
     Return: *Ast,
     Var: struct {
         identifier: *Ast,
@@ -234,20 +247,47 @@ const AstArray = std.ArrayList(Ast);
 
 pub const ParserError = error{
     InvalidToken,
+    MissingToken,
+};
+
+pub const Precedence = enum(u8) {
+    Lowest,
+    Sum,
+    Product,
+    Prefix,
+    Call,
 };
 
 pub const Parser = struct {
     lexer: Lexer,
     allocator: std.mem.Allocator,
-    statements: AstArray,
+    nodes: AstArray,
 
     fn init(allocator: std.mem.Allocator, input: []const u8) !Parser {
-        const statements = try AstArray.initCapacity(allocator, 100);
+        const nodes = try AstArray.initCapacity(allocator, 100);
         return Parser{
             .lexer = Lexer.init(input),
             .allocator = allocator,
-            .statements = statements,
+            .nodes = nodes,
         };
+    }
+
+    fn push_node(self: *Parser, node: Ast) !*Ast {
+        try self.nodes.append(node);
+        return &self.nodes.items[self.nodes.items.len - 1];
+    }
+
+    pub fn getPrecedence(self: *Parser, token: Token) Precedence {
+        switch (token.token_type) {
+            TokenType.Operator => {
+                switch (self.lexer.input[token.start]) {
+                    '+', '-' => return Precedence.Sum,
+                    '*', '/' => return Precedence.Product,
+                    else => return Precedence.Lowest,
+                }
+            },
+            else => return Precedence.Lowest,
+        }
     }
 
     fn check_token_str(self: *Parser, token: Token, str: []const u8) bool {
@@ -255,12 +295,26 @@ pub const Parser = struct {
     }
 
     fn parse(self: *Parser) !void {
-        _ = try self.parse_statement();
+        _ = try self.parse_body();
     }
 
-    fn parse_statement(self: *Parser) !void {
+    fn parse_body(self: *Parser) !void {
+        var nodes = AstArray.init(self.allocator);
+
+        while (true) {
+            const _next = self.lexer.peek();
+            if (_next == null) break;
+
+            const node = try self.parse_statement();
+            try nodes.append(node);
+        }
+
+        try self.nodes.append(Ast{ .Block = nodes });
+    }
+
+    fn parse_statement(self: *Parser) !Ast {
         const _token = self.lexer.next();
-        if (_token == null) return;
+        if (_token == null) return ParserError.MissingToken;
 
         const token = _token.?;
         switch (token.token_type) {
@@ -268,9 +322,9 @@ pub const Parser = struct {
                 if (!self.check_token_str(token, "var")) {
                     return ParserError.InvalidToken;
                 }
-                _ = try self.parse_identifier();
+                const identifier = try self.parse_identifier();
                 const _eq_token = self.lexer.next();
-                if (_eq_token == null) return;
+                if (_eq_token == null) return ParserError.InvalidToken;
 
                 const eq_token = _eq_token.?;
                 if (eq_token.token_type != TokenType.Operator) {
@@ -280,10 +334,19 @@ pub const Parser = struct {
                     return ParserError.InvalidToken;
                 }
 
+                const value = try self.parse_expression(0);
+
+                const semicolon_token = self.lexer.next();
+                if (semicolon_token == null) return ParserError.MissingToken;
+
+                if (semicolon_token.?.token_type != TokenType.Semicolon) {
+                    return ParserError.InvalidToken;
+                }
+
                 // std.debug.print("identifier: {s}\n", .{@tagName(@as(AstType, identifier))});
                 // const value = try self.parse_expression();
-                // const var_stmt = Ast{ .Var = .{ .identifier = identifier, .value = value } };
-                // try self.statements.append(var_stmt);
+                const var_stmt = Ast{ .Var = .{ .identifier = identifier, .value = value } };
+                return var_stmt;
             },
             else => {
                 return ParserError.InvalidToken;
@@ -291,22 +354,122 @@ pub const Parser = struct {
         }
     }
 
-    fn parse_identifier(self: *Parser) !*const Ast {
+    fn parse_var_statement(self: *Parser) !void {
+        _ = self;
+    }
+
+    fn parse_expression(self: *Parser, precedence: u8) anyerror!*Ast {
+        log("start parsing expression\n");
+        var prefix = try self.parse_prefix();
+
+        while (self.lexer.peek() != null and precedence < @intFromEnum(self.getPrecedence(self.lexer.peek().?))) {
+            log("inside while block\n");
+            prefix = try self.parse_infix(prefix);
+        }
+
+        return prefix;
+    }
+
+    fn parse_prefix(self: *Parser) !*Ast {
+        const _token = self.lexer.peek();
+
+        if (_token) |token| {
+            switch (token.token_type) {
+                TokenType.Number, TokenType.Identifier => return self.parse_primary_expression(),
+                else => {
+                    return ParserError.InvalidToken;
+                },
+            }
+        }
+
+        return ParserError.MissingToken;
+    }
+
+    fn parse_infix(self: *Parser, left: *Ast) !*Ast {
+        const _token = self.lexer.next();
+        if (_token) |token| {
+            switch (token.token_type) {
+                TokenType.Operator => {
+                    if (self.check_token_str(token, "+") or
+                        self.check_token_str(token, "-") or
+                        self.check_token_str(token, "*") or
+                        self.check_token_str(token, "/"))
+                    {
+                        const op = self.lexer.slice(token);
+
+                        log("parsing infix \n");
+
+                        const token_precedence = @intFromEnum(self.getPrecedence(token));
+                        const right = try self.parse_expression(token_precedence);
+
+                        log("parsed right \n");
+
+                        const node = Ast{ .BinaryOperator = .{ .op = op, .left = left, .right = right } };
+
+                        return try self.push_node(node);
+                    } else {
+                        return ParserError.InvalidToken;
+                    }
+                },
+                else => {
+                    return ParserError.InvalidToken;
+                },
+            }
+        }
+
+        return ParserError.MissingToken;
+    }
+
+    fn parse_primary_expression(self: *Parser) !*Ast {
+        const _token = self.lexer.peek();
+
+        if (_token) |token| {
+            switch (token.token_type) {
+                TokenType.Identifier => {
+                    return self.parse_identifier();
+                },
+                TokenType.Number => {
+                    return self.parse_number();
+                },
+                else => {
+                    return ParserError.InvalidToken;
+                },
+            }
+        }
+
+        return ParserError.MissingToken;
+    }
+
+    fn parse_identifier(self: *Parser) !*Ast {
         const _token = self.lexer.next();
         if (_token) |token| {
             if (token.token_type != TokenType.Identifier) {
                 return ParserError.InvalidToken;
             }
             const node = Ast{ .Identifier = self.lexer.slice(token) };
-            try self.statements.append(node);
-            return &self.statements.getLast();
+            return try self.push_node(node);
         }
 
-        return ParserError.InvalidToken;
+        return ParserError.MissingToken;
+    }
+
+    fn parse_number(self: *Parser) !*Ast {
+        const _token = self.lexer.next();
+        if (_token) |token| {
+            if (token.token_type != TokenType.Number) {
+                return ParserError.InvalidToken;
+            }
+            const number = try std.fmt.parseInt(i64, self.lexer.slice(token), 10);
+            const node = Ast{ .Number = number };
+
+            return try self.push_node(node);
+        }
+
+        return ParserError.MissingToken;
     }
 
     fn deinint(self: *Parser) void {
-        self.statements.deinit();
+        self.nodes.deinit();
     }
 };
 
@@ -378,7 +541,7 @@ test "punctuation" {
 }
 
 test "var statement" {
-    const string_input = "var x = 123;";
+    var string_input: []const u8 = "var x = 123;";
     var lexer = Lexer.init(string_input);
     var token = lexer.next().?;
     try std.testing.expect(token.token_type == TokenType.Identifier);
@@ -395,10 +558,41 @@ test "var statement" {
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
+    const allocator = arena.allocator();
 
+    var parser = try Parser.init(allocator, string_input);
+    _ = try parser.parse_statement();
+
+    string_input = "var x = a;";
+
+    parser = try Parser.init(allocator, string_input);
+    _ = try parser.parse_statement();
+}
+
+test "expression" {
+    log("\n");
+    const string_input: []const u8 = "1 + 2";
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
     const allocator = arena.allocator();
 
     var parser = try Parser.init(allocator, string_input);
 
+    _ = try parser.parse_expression(0);
+}
+
+test "block" {
+    const string_input =
+        \\var x = 123;
+        \\var y = x + z * y / z;
+        \\var z = y;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = try Parser.init(allocator, string_input);
     try parser.parse();
 }
