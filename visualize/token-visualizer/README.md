@@ -1,19 +1,7 @@
-# SDL2 Zig Demo
+# Visualize a Lexer
 
-Here's a basic window with SDL2 in Zig.
+- [ ] SDL boots up, and I can draw a rectangle
+- [ ] Animate the rectangle
+- [ ] Render text with a font
+- [ ]
 
-![screenshot](screenshot1.png)
-
-## How to build and run it
-
-```
-zig build run
-```
-
-## Cross-Compiling
-
-Pass a `-Dtarget` option. For example:
-
-```
-zig build -Dtarget=x86_64-windows
-```
