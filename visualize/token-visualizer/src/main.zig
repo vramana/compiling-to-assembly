@@ -4,6 +4,24 @@ const c = @cImport({
 const std = @import("std");
 const assert = @import("std").debug.assert;
 
+const Glyph = struct {
+    ax: f32,
+    ay: f32,
+    bw: f32,
+    bh: f32,
+    bl: f32,
+    bt: f32,
+    tx: f32,
+};
+
+const glyphs: Glyph[128] = .{};
+
+fn load_font_atlast() !void {
+    const font_file = "SpaceMono-Regular.ttf";
+    const file = try std.fs.cwd().openFile(font_file, .{});
+    defer file.close();
+}
+
 const State = struct {
     x: c_int,
     y: c_int,
@@ -64,7 +82,35 @@ fn move_down() void {
     globalState.y += 10;
 }
 
+fn prelude() !void {
+    const stdout = std.io.getStdOut().writer();
+
+    // Initialize an arena allocator
+    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const allocator = arena_allocator.allocator();
+
+    // Ensure the arena allocator is cleaned up at the end
+    defer arena_allocator.deinit();
+
+    // Get the current working directory
+    const cwd = try std.fs.cwd().realpathAlloc(allocator, ".");
+
+    // Print the current working directory
+    try stdout.print("Current directory: {s}\n", .{cwd});
+
+    const font_file = "SpaceMono-Regular.ttf";
+    const file = try std.fs.cwd().openFile(font_file, .{});
+    defer file.close();
+
+    const file_info = try file.stat();
+    const file_size = file_info.size;
+
+    try stdout.print("Font File size: {} bytes\n", .{file_size});
+}
+
 pub fn main() !void {
+    try prelude();
+
     const windowHeight = 800;
     const windowWidth = 800;
 
