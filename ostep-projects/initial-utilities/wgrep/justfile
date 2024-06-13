@@ -1,0 +1,3 @@
+build:
+  gcc wgrep.c -o wgrep && ./wgrep int wgrep.c
+
