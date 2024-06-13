@@ -1,0 +1,3 @@
+wcat:
+  gcc wcat.c -o wcat && ./wcat wcat.c
+
