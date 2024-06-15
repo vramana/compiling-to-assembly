@@ -30,7 +30,7 @@
 
 # Executables
 *.exe
-*.out
+!tests/*.out
 *.app
 *.i*86
 *.x86_64
@@ -54,3 +54,5 @@ dkms.conf
 zig-cache/
 .zig-cache/
 zig-out/
+
+a.out
