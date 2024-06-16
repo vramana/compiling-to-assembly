@@ -20,7 +20,7 @@ fn log(message: []const u8) void {
 }
 
 pub const Ast = union(AstType) {
-    Number: i64,
+    Number: []const u8,
     UnaryOperator: struct {
         op: []const u8,
         expr: *Ast,
@@ -68,7 +68,7 @@ pub const Token = struct {
 };
 
 fn isNumeric(c: u8) bool {
-    return c > '0' and c < '9';
+    return c >= '0' and c <= '9';
 }
 
 fn isAlphabetic(c: u8) bool {
@@ -466,8 +466,7 @@ pub const Parser = struct {
         if (token.token_type != TokenType.Number) {
             return ParserError.InvalidToken;
         }
-        const number = try std.fmt.parseInt(i64, self.lexer.slice(token), 10);
-        const node = Ast{ .Number = number };
+        const node = Ast{ .Number = self.lexer.slice(token) };
 
         return try self.push_node(node);
     }

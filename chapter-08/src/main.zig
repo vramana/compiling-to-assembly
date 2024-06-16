@@ -4,13 +4,13 @@ const AstType = @import("parser.zig").AstType;
 const Ast = @import("parser.zig").Ast;
 
 fn asm_statement(allocator: std.mem.Allocator, list: *std.ArrayList(u8), node: *const Ast) !void {
+    _ = allocator;
     switch (node.*) {
         AstType.Var => |value| {
             switch (value.value.*) {
                 AstType.Number => |n| {
-                    const number = try std.fmt.allocPrint(allocator, "{}", .{n});
                     try list.appendSlice("\tmov x0, #");
-                    try list.appendSlice(number);
+                    try list.appendSlice(n);
                     try list.append('\n');
                 },
                 else => unreachable,
@@ -58,7 +58,7 @@ pub fn main() !void {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const string_input = "var a = 3;";
+    const string_input = "var a = 3; var b = 5; var c = 10;";
 
     var parser = try Parser.init(allocator, string_input);
 
