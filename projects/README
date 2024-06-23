@@ -1,0 +1,35 @@
+# Containerized xv6
+
+To build a containerized xv6, run the following command:
+
+```bash
+docker build -t xv6-x86 .
+```
+
+To run xv6, run the following command:
+
+```bash
+docker run -it --rm -v $(pwd):/usr/src/xv6-public xv6-x86
+```
+
+To run the operating system, run the following command:
+
+```bash
+make clean
+make qemu-nox
+```
+
+To run gdb with the operating system, run the following command:
+
+Open 2 terminals, in the first terminal run the following command:
+
+```bash
+make qemu-nox-gdb
+```
+
+In the second terminal run the following command:
+
+```bash
+echo "set auto-load safe-path /" > /root/.gdbinit
+gdb kernel
+```
